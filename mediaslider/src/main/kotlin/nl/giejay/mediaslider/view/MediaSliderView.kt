@@ -9,16 +9,19 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.constraintlayout.widget.ConstraintLayout
+import androidx.constraintlayout.widget.ConstraintSet
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -42,7 +45,6 @@ import nl.giejay.mediaslider.adapter.MetaDataClock
 import nl.giejay.mediaslider.adapter.MetaDataMediaCount
 import nl.giejay.mediaslider.adapter.ScreenSlidePagerAdapter
 import nl.giejay.mediaslider.config.MediaSliderConfiguration
-import nl.giejay.mediaslider.model.MetaDataType
 import nl.giejay.mediaslider.model.SliderItemType
 import nl.giejay.mediaslider.model.SliderItemViewHolder
 import nl.giejay.mediaslider.util.FixedSpeedScroller
@@ -50,12 +52,20 @@ import nl.giejay.mediaslider.util.MediaSliderListener
 import timber.log.Timber
 import java.lang.reflect.Field
 
-
 class MediaSliderView(context: Context) : ConstraintLayout(context) {
-    // view elements
     private var playButton: View
     private var mainHandler: Handler
     private var mPager: ViewPager
+    
+    // --- NUEVO: Icono de Favorito ---
+    private var favoriteIcon: ImageView
+    // --------------------------------
+
+    // --- NUEVO: Callback para avisar al exterior ---
+    // Recibe el item modificado y el nuevo estado booleano
+    var onFavoriteStateChanged: ((SliderItemViewHolder, Boolean) -> Unit)? = null
+    // -----------------------------------------------
+
     private val volumeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == "android.media.VOLUME_CHANGED_ACTION") {
@@ -65,24 +75,11 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
             }
         }
     }
-//    private var sliderMediaNumber: TextView
-//
-//    private var subtitleLeft: TextView
-//    private var subtitleRight: TextView
-//    private var dateLeft: TextView
-//    private var dateRight: TextView
-//    private var titleLeft: TextView
-//    private var titleRight: TextView
-//    private var textViewDescriptions: List<TextView>
-//
-//    private var clock: TextView
 
-    // config
     private lateinit var config: MediaSliderConfiguration
     private lateinit var metaDataLeftAdapter: MetaDataAdapter
     private lateinit var metaDataRightAdapter: MetaDataAdapter
 
-    /// internal
     private var currentPlayerInScope: ExoPlayer? = null
     private var currentPlayerView: PlayerView? = null
     private var defaultExoFactory = DefaultHttpDataSource.Factory()
@@ -94,28 +91,72 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
     private val transformResults = mutableMapOf<Int, String>()
     private var currentToast: Toast? = null
 
+    var onLongPressCenterListener: (() -> Unit)? = null
+    private var isCenterKeyDown = false
+    private var isLongPressTriggered = false
+    private val longPressTimeout = 500L
+    private val longPressRunnable = Runnable {
+        isLongPressTriggered = true
+        onLongPressCenterListener?.invoke()
+        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+    }
+
     init {
         inflate(getContext(), R.layout.slider, this)
-//        val listViewLeft = findViewById<ListView>(R.id.metadata_view_left)
-//        listViewLeft.divider = null
-//        listViewLeft.adapter = MetaDataAdapter(context, config, listOf(MetaDataItem("test!", R.layout.metadata_item_left), MetaDataItem("test 2!", R.layout.metadata_item_left)))
-
         playButton = findViewById(R.id.playPause)
         playButton.setOnClickListener { toggleSlideshow(true) }
-//        clock = findViewById(R.id.clock)
-//        titleRight = findViewById(R.id.title_right)
-//        titleLeft = findViewById(R.id.title_left)
-//        subtitleRight = findViewById(R.id.subtitle_right)
-//        subtitleLeft = findViewById(R.id.subtitle_left)
-//        dateRight = findViewById(R.id.date_right)
-//        dateLeft = findViewById(R.id.date_left)
-//        textViewDescriptions = listOf(titleRight, titleLeft, dateRight, dateLeft, subtitleRight, subtitleLeft)
-
-//        sliderMediaNumber = findViewById(R.id.number)
-//        val left = findViewById<ImageView>(R.id.left_arrow)
-//        val right = findViewById<ImageView>(R.id.right_arrow)
         mPager = findViewById(R.id.pager)
         mainHandler = Handler(Looper.getMainLooper())
+
+        // --- INYECTAR ICONO FAVORITO ---
+        favoriteIcon = ImageView(context)
+        favoriteIcon.id = View.generateViewId()
+        // Usamos la estrella del sistema, igual que en el grid
+        favoriteIcon.setImageResource(android.R.drawable.btn_star_big_on)
+        favoriteIcon.visibility = GONE // Oculto por defecto
+        
+        // Lo añadimos al layout
+        val params = LayoutParams(60, 60) // Tamaño
+        // Lo pondremos arriba a la derecha mediante Constraints programáticas
+        addView(favoriteIcon, params)
+
+        // --- FIX: ASIGNAR IDs A VISTAS QUE NO TENGAN (DEL XML INFLADO) ---
+        // ConstraintSet requiere que TODOS los hijos tengan ID. Si el XML slider.xml
+        // tiene algún View o Spacer sin ID, esto lo arregla automáticamente.
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            if (child.id == View.NO_ID) {
+                child.id = View.generateViewId()
+            }
+        }
+        
+        val set = ConstraintSet()
+        set.clone(this)
+        set.connect(favoriteIcon.id, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP, 40)
+        set.connect(favoriteIcon.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END, 40)
+        set.applyTo(this)
+        // -------------------------------
+    
+        // --- NUEVO: EVENTO CLICK EN LA ESTRELLA ---
+        favoriteIcon.setOnClickListener {
+            // 1. Obtenemos el item actual
+            val current = currentItem()
+            val item = if (current.hasSecondaryItem()) current.mainItem else current.mainItem 
+            // Nota: Ajusta la lógica de arriba si secondaryItem es relevante para favoritos, 
+            // normalmente el favorito va ligado al mainItem.
+
+            // 2. Cambiamos el estado local (para feedback visual instantáneo)
+            item.isFavorite = !item.isFavorite
+            // updateFavoriteIcon()
+
+            // 3. ¡AVISAMOS AL FRAGMENTO!
+            onFavoriteStateChanged?.invoke(current, item.isFavorite)
+        }
+        // ------------------------------------------
+
+        // --- Actualización inicial ---
+        updateFavoriteIcon()
+
     }
 
     override fun onAttachedToWindow() {
@@ -131,19 +172,39 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
 
     @OptIn(UnstableApi::class)
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                if (event.repeatCount == 0) {
+                    isCenterKeyDown = true
+                    isLongPressTriggered = false
+                    mainHandler.postDelayed(longPressRunnable, longPressTimeout)
+                }
+                return true
+            } 
+            else if (event.action == KeyEvent.ACTION_UP) {
+                isCenterKeyDown = false
+                mainHandler.removeCallbacks(longPressRunnable)
+                if (isLongPressTriggered) {
+                    isLongPressTriggered = false
+                    return true
+                }
+                if (currentItemType() == SliderItemType.IMAGE) {
+                    toggleSlideshow(true)
+                } else if (currentPlayerView != null) {
+                     if (currentPlayerInScope?.isPlaying == true) currentPlayerInScope?.pause()
+                     else currentPlayerInScope?.play()
+                }
+                return true
+            }
+        }
+
         if (mPager.adapter == null) {
             return super.dispatchKeyEvent(event)
         }
         val itemType = currentItemType()
+        
         if (event.action == KeyEvent.ACTION_DOWN) {
             if (context is MediaSliderListener && (context as MediaSliderListener).onButtonPressed(event)) {
-                return false
-            } else if ((event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER || event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY || event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)) {
-                if (itemType == SliderItemType.IMAGE) {
-                    toggleSlideshow(true)
-                } else if (currentPlayerView != null) {
-                    return super.dispatchKeyEvent(event)
-                }
                 return false
             } else if (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN && itemType == SliderItemType.VIDEO && currentPlayerView != null) {
                 currentPlayerView!!.useController = true
@@ -156,7 +217,6 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
                 if (event.keyCode != KeyEvent.KEYCODE_DPAD_RIGHT) {
                     toggleSlideshow(true)
                 } else {
-                    // remove all current callbacks to prevent multiple runnables
                     mainHandler.removeCallbacks(goToNextAssetRunnable)
                     goToNextAsset()
                     return false
@@ -188,6 +248,7 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
     fun loadMediaSliderView(config: MediaSliderConfiguration) {
         this.config = config
 
+        // ... (resto de adaptadores de metadatos igual) ...
         val listViewRight = findViewById<ListView>(R.id.metadata_view_right)
         metaDataRightAdapter = MetaDataAdapter(context,
             config.metaDataConfig.filter { it.align == AlignOption.RIGHT },
@@ -203,7 +264,6 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
         val listViewLeft = findViewById<ListView>(R.id.metadata_view_left)
         metaDataLeftAdapter = MetaDataAdapter(context,
             config.metaDataConfig.filter { it.align == AlignOption.LEFT },
-            // dont show the clock/media count twice in portrait mode and force everything to be left aligned
             config.metaDataConfig.filterNot { it is MetaDataClock || it is MetaDataMediaCount }
                 .map { it.withAlign(align = AlignOption.LEFT) }.distinct(),
             { metaData, sliderItem, textView ->
@@ -220,12 +280,10 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
                     goToNextAsset()
                 }
             }
-
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 val playPauseButton = findViewById<ImageButton>(R.id.exo_pause)
                 playPauseButton?.setImageResource(if (isPlaying) R.drawable.exo_legacy_controls_pause else R.drawable.exo_legacy_controls_play)
             }
-
             override fun onPlayerError(error: PlaybackException) {
                 if (slideShowPlaying) {
                     goToNextAsset()
@@ -233,6 +291,23 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
             }
         }
         initViewsAndSetAdapter(listener)
+        
+        // --- ACTUALIZAR ICONO AL CARGAR ---
+        updateFavoriteIcon()
+    }
+    
+    // --- MÉTODO PÚBLICO PARA ACTUALIZAR ICONO ---
+    fun updateFavoriteIcon() {
+    
+        // Si la config no está lista, no hacemos nada (y no crasheamos)
+        if (!::config.isInitialized) return
+        
+        val item = currentItem().mainItem // Cogemos la principal
+        if (item.isFavorite) {
+            favoriteIcon.visibility = VISIBLE
+        } else {
+            favoriteIcon.visibility = GONE
+        }
     }
 
     private fun setStartPosition() {
@@ -251,12 +326,10 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
     fun toggleSlideshow(togglePlayButton: Boolean) {
         slideShowPlaying = !slideShowPlaying
         if (slideShowPlaying) {
-            // do not start timers for videos, they will continue in the player listener
             if (currentItemType() == SliderItemType.IMAGE) {
                 startTimerNextAsset()
             }
             if (context is Activity) {
-                // view is being triggered from main app, prevent app going to sleep
                 (context as Activity).window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
         } else {
@@ -308,7 +381,6 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
                 val mScroller: Field = ViewPager::class.java.getDeclaredField("mScroller")
                 mScroller.isAccessible = true
                 val scroller = FixedSpeedScroller(mPager.context, DecelerateInterpolator(0.75F), config.animationSpeedMillis)
-                // scroller.setFixedDuration(5000);
                 mScroller.set(mPager, scroller)
             }
         } catch (e: Exception) {
@@ -323,6 +395,10 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
                 if (i != mPager.currentItem) {
                     return
                 }
+                // --- ACTUALIZAR ICONO AL DESLIZAR ---
+                updateFavoriteIcon()
+                // ------------------------------------
+                
                 val sliderItem = config.items[i]
                 config.onAssetSelected(sliderItem)
                 metaDataRightAdapter.notifyDataSetChanged()
@@ -336,7 +412,6 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
 
                 if (config.loadMore != null && mPager.currentItem > config.items.size - 10 && !loading) {
                     loading = true
-
                     ioScope.launch {
                         val nextItems = config.loadMore!!.invoke()
                         addItemsMain(nextItems)
@@ -384,7 +459,8 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
             }
         })
     }
-
+    
+    // ... (resto de métodos onDestroy, clearKeepScreenOnFlags, etc igual que antes) ...
     fun onDestroy() {
         if (currentPlayerInScope != null) {
             currentPlayerInScope!!.release()
@@ -395,7 +471,6 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
 
     private fun clearKeepScreenOnFlags() {
         if (context is Activity) {
-            // view is being triggered from main app, remove the flags to keep screen on
             val window = (context as Activity).window
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
@@ -425,7 +500,6 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
             return
         }
         if (slideShowPlaying) {
-            // to prevent timing issues when adding + sliding at the same time
             mainHandler.removeCallbacks(goToNextAssetRunnable)
         }
         config.items = items
@@ -437,6 +511,10 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
 
     private fun currentItem(): SliderItemViewHolder = config.items[mPager.currentItem]
     private fun currentItemType(): SliderItemType = config.items[mPager.currentItem].type
+    
+    fun getCurrentIndex(): Int {
+        return mPager.currentItem
+    }
 
     @OptIn(UnstableApi::class)
     fun isControllerVisible(): Boolean {
