@@ -39,13 +39,15 @@ class MediaSliderConfiguration : Parcelable {
                 debugEnabled: Boolean,
                 gradiantOverlay: Boolean,
                 enableSlideAnimation: Boolean,
-                metaDataConfig: List<MetaDataItem>) {
+                metaDataConfig: List<MetaDataItem>,
+                loadPrevious: LoadMore? = null) {
         this.startPosition = startPosition
         this.interval = interval
         this.isOnlyUseThumbnails = onlyUseThumbnails
         this.isVideoSoundEnable = isVideoSoundEnable
         this.metaDataConfig = metaDataConfig
         Companion.loadMore = loadMore
+        Companion.loadPrevious = loadPrevious
         Companion.assets = assets
         Companion.onAssetSelected = onAssetSelected
         this.animationSpeedMillis = animationSpeedMillis
@@ -84,6 +86,9 @@ class MediaSliderConfiguration : Parcelable {
     val loadMore: LoadMore?
         get() = Companion.loadMore
 
+    val loadPrevious: LoadMore?
+        get() = Companion.loadPrevious
+
     val onAssetSelected: (SliderItemViewHolder) -> Unit
         get() = Companion.onAssetSelected
 
@@ -110,6 +115,7 @@ class MediaSliderConfiguration : Parcelable {
         // Cant be serializable so this "workaround" for these two fields
         var assets: List<SliderItemViewHolder> = emptyList()
         var loadMore: LoadMore? = null
+        var loadPrevious: LoadMore? = null
         var onAssetSelected: (SliderItemViewHolder) -> Unit = { _ -> }
 
         @JvmField

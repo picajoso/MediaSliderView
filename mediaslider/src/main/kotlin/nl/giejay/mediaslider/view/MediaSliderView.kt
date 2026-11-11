@@ -9,7 +9,6 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
@@ -33,7 +32,8 @@ import androidx.media3.ui.PlayerView
 import androidx.viewpager.widget.ViewPager
 import com.google.common.collect.Iterables
 import com.google.common.collect.Lists
-import com.zeuskartik.mediaslider.R
+// IMPORTANTE: Usamos los recursos de este módulo
+import com.zeuskartik.mediaslider.R 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -57,14 +57,11 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
     private var mainHandler: Handler
     private var mPager: ViewPager
     
-    // --- NUEVO: Icono de Favorito ---
+    // Icono de Favorito
     private var favoriteIcon: ImageView
-    // --------------------------------
 
-    // --- NUEVO: Callback para avisar al exterior ---
-    // Recibe el item modificado y el nuevo estado booleano
+    // Callback para avisar al exterior
     var onFavoriteStateChanged: ((SliderItemViewHolder, Boolean) -> Unit)? = null
-    // -----------------------------------------------
 
     private val volumeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -111,18 +108,14 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
         // --- INYECTAR ICONO FAVORITO ---
         favoriteIcon = ImageView(context)
         favoriteIcon.id = View.generateViewId()
-        // Usamos la estrella del sistema, igual que en el grid
-        favoriteIcon.setImageResource(android.R.drawable.btn_star_big_on)
-        favoriteIcon.visibility = GONE // Oculto por defecto
+        // CORRECCIÓN: Usamos el corazón BLANCO RELLENO
+        favoriteIcon.setImageResource(R.drawable.ic_favorite_white_filled_24dp)
+        favoriteIcon.visibility = GONE 
         
-        // Lo añadimos al layout
-        val params = LayoutParams(60, 60) // Tamaño
-        // Lo pondremos arriba a la derecha mediante Constraints programáticas
+        val params = LayoutParams(60, 60)
         addView(favoriteIcon, params)
 
-        // --- FIX: ASIGNAR IDs A VISTAS QUE NO TENGAN (DEL XML INFLADO) ---
-        // ConstraintSet requiere que TODOS los hijos tengan ID. Si el XML slider.xml
-        // tiene algún View o Spacer sin ID, esto lo arregla automáticamente.
+        // Asignar IDs a hijos sin ID para que ConstraintSet funcione
         for (i in 0 until childCount) {
             val child = getChildAt(i)
             if (child.id == View.NO_ID) {
@@ -135,28 +128,19 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
         set.connect(favoriteIcon.id, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP, 40)
         set.connect(favoriteIcon.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END, 40)
         set.applyTo(this)
-        // -------------------------------
     
-        // --- NUEVO: EVENTO CLICK EN LA ESTRELLA ---
+        // Click en el corazón
         favoriteIcon.setOnClickListener {
-            // 1. Obtenemos el item actual
             val current = currentItem()
             val item = if (current.hasSecondaryItem()) current.mainItem else current.mainItem 
-            // Nota: Ajusta la lógica de arriba si secondaryItem es relevante para favoritos, 
-            // normalmente el favorito va ligado al mainItem.
-
-            // 2. Cambiamos el estado local (para feedback visual instantáneo)
             item.isFavorite = !item.isFavorite
-            // updateFavoriteIcon()
-
-            // 3. ¡AVISAMOS AL FRAGMENTO!
+            // Avisamos al fragmento
             onFavoriteStateChanged?.invoke(current, item.isFavorite)
+            // Actualizamos icono visualmente
+            updateFavoriteIcon() 
         }
-        // ------------------------------------------
 
-        // --- Actualización inicial ---
         updateFavoriteIcon()
-
     }
 
     override fun onAttachedToWindow() {
@@ -231,6 +215,12 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
                 return false
             } else if (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                 if (itemType == SliderItemType.IMAGE || currentPlayerView?.isControllerFullyVisible == false) {
+                    Timber.tag("SLIDER").d("DPAD_LEFT. Index: ${mPager.currentItem}. LoadPrevious: ${config.loadPrevious}")
+                    if (mPager.currentItem == 0 && config.loadPrevious != null) {
+                        Timber.tag("SLIDER").d("Triggering handleLoadPrevious()")
+                        handleLoadPrevious()
+                        return true
+                    }
                     goToPreviousAsset()
                     return false
                 }
@@ -238,6 +228,39 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
             }
         }
         return if (itemType == SliderItemType.IMAGE) false else super.dispatchKeyEvent(event)
+    }
+
+    private fun handleLoadPrevious() {
+        val loadPrevious = config.loadPrevious ?: return
+        
+        ioScope.launch {
+            val newItems = loadPrevious()
+            Timber.d("SLIDER: Loaded ${newItems.size} previous items.")
+            
+            if (newItems.isNotEmpty()) {
+                withContext(Dispatchers.Main) {
+                    // Update Configuration Items
+                    val currentItems = config.items
+                    val combinedItems = newItems + currentItems
+                    config.items = combinedItems
+                    
+                    Timber.d("SLIDER: Merged items. New Size: ${combinedItems.size}.")
+
+                    // Update View
+                    setItems(combinedItems)
+                    
+                    val newIndex = newItems.size - 1
+                    Timber.d("SLIDER: Setting new index to $newIndex")
+                    mPager.setCurrentItem(newIndex, false) // False to avoid animation during jump
+                    
+                    Toast.makeText(context, "Cargando mes anterior...", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                 withContext(Dispatchers.Main) {
+                     Toast.makeText(context, "No hay más fotos recientes", Toast.LENGTH_SHORT).show()
+                 }
+            }
+        }
     }
 
     private fun goToPreviousAsset() {
@@ -248,7 +271,6 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
     fun loadMediaSliderView(config: MediaSliderConfiguration) {
         this.config = config
 
-        // ... (resto de adaptadores de metadatos igual) ...
         val listViewRight = findViewById<ListView>(R.id.metadata_view_right)
         metaDataRightAdapter = MetaDataAdapter(context,
             config.metaDataConfig.filter { it.align == AlignOption.RIGHT },
@@ -291,18 +313,12 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
             }
         }
         initViewsAndSetAdapter(listener)
-        
-        // --- ACTUALIZAR ICONO AL CARGAR ---
         updateFavoriteIcon()
     }
     
-    // --- MÉTODO PÚBLICO PARA ACTUALIZAR ICONO ---
     fun updateFavoriteIcon() {
-    
-        // Si la config no está lista, no hacemos nada (y no crasheamos)
         if (!::config.isInitialized) return
-        
-        val item = currentItem().mainItem // Cogemos la principal
+        val item = currentItem().mainItem
         if (item.isFavorite) {
             favoriteIcon.visibility = VISIBLE
         } else {
@@ -395,9 +411,7 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
                 if (i != mPager.currentItem) {
                     return
                 }
-                // --- ACTUALIZAR ICONO AL DESLIZAR ---
                 updateFavoriteIcon()
-                // ------------------------------------
                 
                 val sliderItem = config.items[i]
                 config.onAssetSelected(sliderItem)
@@ -460,7 +474,6 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
         })
     }
     
-    // ... (resto de métodos onDestroy, clearKeepScreenOnFlags, etc igual que antes) ...
     fun onDestroy() {
         if (currentPlayerInScope != null) {
             currentPlayerInScope!!.release()
@@ -504,6 +517,20 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
         }
         config.items = items
         pagerAdapter!!.setItems(items)
+
+        // Ensure current index is still valid
+        if (mPager.currentItem >= items.size) {
+            mPager.setCurrentItem(items.size - 1, false)
+        } else {
+            // Force refresh of metadata and state for the current item
+            // even if the index didn't change (the data at this index did)
+            updateFavoriteIcon()
+            val sliderItem = items[mPager.currentItem]
+            config.onAssetSelected(sliderItem)
+            metaDataRightAdapter.notifyDataSetChanged()
+            metaDataLeftAdapter.notifyDataSetChanged()
+        }
+
         if (slideShowPlaying && currentItemType() == SliderItemType.IMAGE) {
             startTimerNextAsset()
         }
@@ -514,6 +541,10 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
     
     fun getCurrentIndex(): Int {
         return mPager.currentItem
+    }
+
+    fun setCurrentIndex(index: Int) {
+        mPager.currentItem = index
     }
 
     @OptIn(UnstableApi::class)
