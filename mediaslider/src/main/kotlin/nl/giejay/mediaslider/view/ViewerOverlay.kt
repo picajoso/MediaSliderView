@@ -30,23 +30,32 @@ private fun TextView.applyFont(style: ViewerStyle, title: Boolean) {
 internal object ViewerFormat {
     private fun locale(): Locale = Locale.getDefault(Locale.Category.FORMAT)
 
-    private fun format(skeleton: String, millis: Long): String {
+    private fun zone(id: String?): java.util.TimeZone? =
+        if (id != null && java.util.TimeZone.getAvailableIDs().contains(id)) java.util.TimeZone.getTimeZone(id) else null
+
+    private fun format(skeleton: String, millis: Long, tz: String?): String {
         val locale = locale()
         val pattern = DateFormat.getBestDateTimePattern(locale, skeleton)
-        return SimpleDateFormat(pattern, locale).format(Date(millis))
+        val f = SimpleDateFormat(pattern, locale)
+        zone(tz)?.let { f.timeZone = it }
+        return f.format(Date(millis))
     }
 
     /** "25 Oct 2026" */
-    fun shortDate(millis: Long): String = format("dMMMyyyy", millis)
+    fun shortDate(millis: Long, tz: String?): String = format("dMMMyyyy", millis, tz)
 
     /** "Oct 25, 2026" */
-    fun date(millis: Long): String = format("MMMdyyyy", millis)
+    fun date(millis: Long, tz: String?): String = format("MMMdyyyy", millis, tz)
 
     /** "Saturday" */
-    fun weekday(millis: Long): String = format("EEEE", millis)
+    fun weekday(millis: Long, tz: String?): String = format("EEEE", millis, tz)
 
     /** "12:14" (respects the 24h setting of the device) */
-    fun time(context: Context, millis: Long): String = DateFormat.getTimeFormat(context).format(Date(millis))
+    fun time(context: Context, millis: Long, tz: String?): String {
+        val f = DateFormat.getTimeFormat(context)
+        zone(tz)?.let { f.timeZone = it }
+        return f.format(Date(millis))
+    }
 
     private fun trimNumber(value: Double): String {
         val rounded = Math.round(value * 10.0) / 10.0
@@ -139,7 +148,7 @@ class ViewerInfoPill(context: Context, private val style: ViewerStyle) : LinearL
         val details = item.details
         val placeText = (details?.city ?: item.metaData[MetaDataType.CITY])?.takeIf { it.isNotBlank() }
             ?: (details?.country ?: item.metaData[MetaDataType.COUNTRY])?.takeIf { it.isNotBlank() }
-        val dateText = details?.dateMillis?.let { ViewerFormat.shortDate(it) }
+        val dateText = details?.dateMillis?.let { ViewerFormat.shortDate(it, details?.timeZoneId) }
             ?: item.metaData[MetaDataType.DATE]?.takeIf { it.isNotBlank() }
 
         heart.visibility = if (item.isFavorite) View.VISIBLE else View.GONE
@@ -232,17 +241,18 @@ class ViewerInfoPanel(context: Context, private val style: ViewerStyle) : Linear
         blocks.removeAllViews()
         val d = item.details
         val millis = d?.dateMillis
+        val tz = d?.timeZoneId
 
         // date + time
         if (millis != null) {
             if (style.cardBlocks) {
                 addBlock(
                     R.drawable.ic_viewer_calendar,
-                    "${ViewerFormat.weekday(millis)}, ${ViewerFormat.date(millis)}",
-                    listOf(ViewerFormat.time(ctx, millis))
+                    "${ViewerFormat.weekday(millis, tz)}, ${ViewerFormat.date(millis, tz)}",
+                    listOf(ViewerFormat.time(ctx, millis, tz))
                 )
             } else {
-                addDateHeader(ViewerFormat.weekday(millis), "${ViewerFormat.date(millis)} · ${ViewerFormat.time(ctx, millis)}")
+                addDateHeader(ViewerFormat.weekday(millis, tz), "${ViewerFormat.date(millis, tz)} · ${ViewerFormat.time(ctx, millis, tz)}")
             }
         } else {
             item.metaData[MetaDataType.DATE]?.takeIf { it.isNotBlank() }?.let {

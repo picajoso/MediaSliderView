@@ -19,5 +19,7 @@ data class SliderItemDetails(
     val iso: Int? = null,
     val width: Int? = null,
     val height: Int? = null,
-    val fileSizeBytes: Long? = null
+    val fileSizeBytes: Long? = null,
+    /** IANA id of the photo's own timezone; device timezone when null/unknown */
+    val timeZoneId: String? = null
 ) : Serializable
