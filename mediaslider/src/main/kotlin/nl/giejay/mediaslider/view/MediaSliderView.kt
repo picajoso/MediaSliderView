@@ -60,6 +60,19 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
     // Icono de Favorito
     private var favoriteIcon: ImageView
 
+    // --- Viewer overlay (info pill + info side panel), enabled by the host app ---
+    private var viewerOverlayEnabled = false
+    private var viewerStyle: ViewerStyle = ViewerStyle()
+    private var infoPill: ViewerInfoPill? = null
+    private var infoPanel: ViewerInfoPanel? = null
+    private var infoPanelOpen = false
+    private var infoPanelReservedPx = 0
+    private var swallowBackUp = false
+    private val hideInfoPillRunnable = Runnable { hideInfoPillNow() }
+
+    /** Asked when the "Favorite" button of the info panel is pressed; the host toggles the favorite. */
+    var onToggleFavoriteRequested: (() -> Unit)? = null
+
     // Callback para avisar al exterior
     var onFavoriteStateChanged: ((SliderItemViewHolder, Boolean) -> Unit)? = null
 
@@ -151,11 +164,40 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        mainHandler.removeCallbacks(hideInfoPillRunnable)
         context.unregisterReceiver(volumeReceiver)
     }
 
     @OptIn(UnstableApi::class)
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (viewerOverlayEnabled) {
+            if (event.action == KeyEvent.ACTION_DOWN && !infoPanelOpen) {
+                // any key press brings the info pill back for 3 seconds
+                showInfoPill()
+            }
+            if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP && swallowBackUp) {
+                // the matching DOWN closed the info panel, do not let the UP leave the viewer
+                swallowBackUp = false
+                return true
+            }
+            if (infoPanelOpen && handleInfoPanelKey(event)) {
+                return true
+            }
+            if (!infoPanelOpen && event.action == KeyEvent.ACTION_DOWN && ::config.isInitialized &&
+                mPager.adapter != null && config.items.isNotEmpty() && mPager.currentItem in config.items.indices) {
+                val isInfoKey = event.keyCode == KeyEvent.KEYCODE_INFO
+                val isDownOnImage = event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN &&
+                        currentItemType() == SliderItemType.IMAGE && !slideShowPlaying
+                if (isInfoKey || isDownOnImage) {
+                    openInfoPanel()
+                    return true
+                }
+            }
+        }
+        if (infoPanelOpen) {
+            // while the panel is open only the panel buttons take center / up / down
+            return super.dispatchKeyEvent(event)
+        }
         if (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER) {
             if (event.action == KeyEvent.ACTION_DOWN) {
                 if (event.repeatCount == 0) {
@@ -314,11 +356,170 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
         }
         initViewsAndSetAdapter(listener)
         updateFavoriteIcon()
+        if (viewerOverlayEnabled) {
+            showInfoPill()
+        }
     }
-    
+
+    /**
+     * Turns the viewer into "photo only" with a transient info pill (heart if favorite, place,
+     * date) and an info side panel (down / Info key). The classic metadata lists and the corner
+     * heart are hidden. Call before [loadMediaSliderView].
+     */
+    fun enableViewerOverlay(style: ViewerStyle) {
+        viewerStyle = style
+        viewerOverlayEnabled = true
+        val density = resources.displayMetrics.density
+
+        findViewById<LinearLayout>(R.id.meta_data_holder)?.visibility = GONE
+        favoriteIcon.visibility = GONE
+
+        infoPill?.let { removeView(it) }
+        infoPanel?.let { removeView(it) }
+
+        val pill = ViewerInfoPill(context, style)
+        pill.elevation = 12 * density
+        val pillParams = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT)
+        pillParams.bottomToBottom = LayoutParams.PARENT_ID
+        pillParams.startToStart = LayoutParams.PARENT_ID
+        pillParams.endToEnd = LayoutParams.PARENT_ID
+        pillParams.bottomMargin = (24 * density).toInt()
+        addView(pill, pillParams)
+        infoPill = pill
+
+        val panel = ViewerInfoPanel(context, style)
+        panel.elevation = 14 * density
+        panel.visibility = GONE
+        val margin = (style.panelMarginDp * density).toInt()
+        val panelParams = LayoutParams((style.panelWidthDp * density).toInt(), 0)
+        panelParams.topToTop = LayoutParams.PARENT_ID
+        panelParams.bottomToBottom = LayoutParams.PARENT_ID
+        panelParams.endToEnd = LayoutParams.PARENT_ID
+        panelParams.setMargins(0, margin, margin, margin)
+        addView(panel, panelParams)
+        panel.onFavoriteClick = { onToggleFavoriteRequested?.invoke() }
+        panel.onSlideshowClick = {
+            closeInfoPanel()
+            toggleSlideshow(true)
+        }
+        infoPanel = panel
+        // photo area keeps a small gap to the panel
+        infoPanelReservedPx = ((style.panelWidthDp + style.panelMarginDp + 8) * density).toInt()
+    }
+
+    private fun showInfoPill() {
+        val pill = infoPill ?: return
+        if (!::config.isInitialized || mPager.adapter == null || infoPanelOpen) return
+        if (config.items.isEmpty() || mPager.currentItem !in config.items.indices) return
+        if (!pill.bind(currentItem().mainItem)) {
+            hideInfoPillNow()
+            return
+        }
+        mainHandler.removeCallbacks(hideInfoPillRunnable)
+        pill.animate().cancel()
+        pill.animate().alpha(1f).setDuration(150).start()
+        mainHandler.postDelayed(hideInfoPillRunnable, INFO_PILL_VISIBLE_MS)
+    }
+
+    private fun hideInfoPillNow() {
+        mainHandler.removeCallbacks(hideInfoPillRunnable)
+        val pill = infoPill ?: return
+        pill.animate().cancel()
+        pill.animate().alpha(0f).setDuration(300).start()
+    }
+
+    private fun openInfoPanel() {
+        val panel = infoPanel ?: return
+        if (infoPanelOpen) return
+        if (slideShowPlaying) {
+            toggleSlideshow(false)
+        }
+        infoPanelOpen = true
+        mainHandler.removeCallbacks(hideInfoPillRunnable)
+        infoPill?.animate()?.cancel()
+        infoPill?.alpha = 0f
+        panel.bind(currentItem().mainItem)
+        panel.visibility = VISIBLE
+        panel.translationX = infoPanelReservedPx.toFloat()
+        panel.animate().translationX(0f).setDuration(180).start()
+        // re-layout the photo to the left so the panel never covers it
+        setPagerEndMargin(infoPanelReservedPx)
+        panel.focusFirstButton()
+    }
+
+    private fun closeInfoPanel() {
+        val panel = infoPanel ?: return
+        if (!infoPanelOpen) return
+        infoPanelOpen = false
+        // hand focus back to the pager first, otherwise key events stop reaching this view
+        mPager.requestFocus()
+        panel.animate().cancel()
+        panel.animate().translationX(infoPanelReservedPx.toFloat()).setDuration(150).withEndAction {
+            if (!infoPanelOpen) panel.visibility = GONE
+        }.start()
+        setPagerEndMargin(0)
+        showInfoPill()
+    }
+
+    private fun setPagerEndMargin(px: Int) {
+        val lp = mPager.layoutParams as? LayoutParams ?: return
+        if (lp.marginEnd == px) return
+        lp.marginEnd = px
+        mPager.layoutParams = lp
+    }
+
+    /** Key handling while the info panel is open. Returns true when the event was consumed here. */
+    private fun handleInfoPanelKey(event: KeyEvent): Boolean {
+        val panel = infoPanel ?: return false
+        if (event.action != KeyEvent.ACTION_DOWN) {
+            // swallow the UP of keys we consume on DOWN
+            return event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+        }
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_BACK -> {
+                swallowBackUp = true
+                closeInfoPanel()
+                return true
+            }
+            KeyEvent.KEYCODE_INFO -> {
+                closeInfoPanel()
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                if (panel.isFirstButtonFocused() || !panel.isAnyButtonFocused()) {
+                    closeInfoPanel()
+                    return true
+                }
+            }
+            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                goToPreviousAsset()
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                goToNextAsset()
+                return true
+            }
+        }
+        return false
+    }
+
     fun updateFavoriteIcon() {
+        updateFavoriteIcon(showPill = true)
+    }
+
+    private fun updateFavoriteIcon(showPill: Boolean) {
         if (!::config.isInitialized) return
         val item = currentItem().mainItem
+        if (viewerOverlayEnabled) {
+            // the corner heart is replaced by the pill / panel
+            favoriteIcon.visibility = GONE
+            if (infoPanelOpen) {
+                infoPanel?.bind(item)
+            } else if (showPill) {
+                showInfoPill()
+            }
+            return
+        }
         if (item.isFavorite) {
             favoriteIcon.visibility = VISIBLE
         } else {
@@ -475,6 +676,7 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
     }
     
     fun onDestroy() {
+        mainHandler.removeCallbacks(hideInfoPillRunnable)
         if (currentPlayerInScope != null) {
             currentPlayerInScope!!.release()
         }
@@ -524,7 +726,7 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
         } else {
             // Force refresh of metadata and state for the current item
             // even if the index didn't change (the data at this index did)
-            updateFavoriteIcon()
+            updateFavoriteIcon(showPill = false)
             val sliderItem = items[mPager.currentItem]
             config.onAssetSelected(sliderItem)
             metaDataRightAdapter.notifyDataSetChanged()
@@ -553,6 +755,8 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
     }
 
     companion object {
+        private const val INFO_PILL_VISIBLE_MS = 3000L
+
         @SuppressLint("UnsafeOptInUsageError")
         fun prepareMedia(mediaUrl: String, player: ExoPlayer, factory: DefaultHttpDataSource.Factory) {
             val mediaUri = Uri.parse(mediaUrl)

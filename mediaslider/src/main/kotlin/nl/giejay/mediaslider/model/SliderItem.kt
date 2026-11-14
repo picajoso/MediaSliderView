@@ -12,7 +12,8 @@ data class SliderItem(
     val type: SliderItemType,
     val metaData: Map<MetaDataType, String?> = emptyMap(),
     val thumbnailUrl: String? = null, // Nombre corregido para que coincida con el resto de la app
-    var isFavorite: Boolean = false   // Nuestro campo nuevo para favoritos
+    var isFavorite: Boolean = false,  // Nuestro campo nuevo para favoritos
+    val details: SliderItemDetails? = null // data for the viewer pill / info panel
 ) : Serializable {
 
     // Esta función es necesaria porque MetaDataAdapter la usa
