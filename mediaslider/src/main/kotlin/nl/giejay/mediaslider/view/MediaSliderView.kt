@@ -68,6 +68,7 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
     private var infoPanelOpen = false
     private var infoPanelReservedPx = 0
     private var photoInsetPx = 0
+    private var photoCornerPx = 0f
     private var swallowBackUp = false
     private val hideInfoPillRunnable = Runnable { hideInfoPillNow() }
 
@@ -405,8 +406,9 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
         }
         infoPanel = panel
         // photo area keeps a small gap to the panel
-        infoPanelReservedPx = ((style.panelWidthDp + style.panelMarginDp + 8) * density).toInt()
+        infoPanelReservedPx = ((style.panelWidthDp + style.panelMarginDp + style.photoGapDp) * density).toInt()
         photoInsetPx = (style.photoInsetDp * density).toInt()
+        photoCornerPx = style.photoCornerDp * density
     }
 
     private fun showInfoPill() {
@@ -472,6 +474,18 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
         lp.bottomMargin = inset
         lp.marginEnd = end
         mPager.layoutParams = lp
+        // rounded photo while the panel is open (Google TV)
+        if (photoCornerPx > 0f && inset > 0) {
+            val r = photoCornerPx
+            mPager.outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, r)
+                }
+            }
+            mPager.clipToOutline = true
+        } else {
+            mPager.clipToOutline = false
+        }
     }
 
     /** Key handling while the info panel is open. Returns true when the event was consumed here. */

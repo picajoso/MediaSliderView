@@ -25,6 +25,17 @@ data class ViewerStyle(
     val panelPaddingVDp: Int = 22,
     /** space around the photo while the panel is open (Apple: the photo floats with a margin) */
     val photoInsetDp: Int = 17,
+    /** gap between the photo and the panel, besides the panel's own margin */
+    val photoGapDp: Int = 8,
+    /** corner radius of the photo while the panel is open */
+    val photoCornerDp: Float = 0f,
+    // pill metrics
+    val pillTextSp: Float = 12f,
+    val pillPadVDp: Float = 7f,
+    /** "·" between place and date (Apple); Google TV just leaves a gap */
+    val pillShowSeparator: Boolean = true,
+    /** fixed height of the panel buttons, 0 = wrap the content */
+    val buttonHeightDp: Int = 0,
     /** "Details" heading above the blocks (Google TV) */
     val panelHeading: Boolean = false,
 

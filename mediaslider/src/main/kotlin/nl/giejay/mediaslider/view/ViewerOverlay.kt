@@ -125,21 +125,21 @@ class ViewerInfoPill(context: Context, private val style: ViewerStyle) : LinearL
             setColor(style.pillBg)
             setStroke(context.dpToPx(0.5f).coerceAtLeast(1), style.pillStroke)
         }
-        setPadding(context.dpToPx(11f), context.dpToPx(7f), context.dpToPx(14f), context.dpToPx(7f))
+        setPadding(context.dpToPx(11f), context.dpToPx(style.pillPadVDp), context.dpToPx(14f), context.dpToPx(style.pillPadVDp))
 
         heart.setImageResource(R.drawable.ic_favorite_white_filled_24dp)
         addView(heart, LayoutParams(context.dpToPx(14f), context.dpToPx(14f)).apply {
             marginEnd = context.dpToPx(8f)
         })
 
-        place.textSize = 12f
+        place.textSize = style.pillTextSp
         place.setTextColor(style.pillText)
         place.applyFont(style, true)
         place.setSingleLine(true)
         addView(place, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
 
         separator.text = "·"
-        separator.textSize = 12f
+        separator.textSize = style.pillTextSp
         separator.setTextColor(style.pillSeparator)
         separator.applyFont(style, false)
         addView(separator, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
@@ -147,7 +147,7 @@ class ViewerInfoPill(context: Context, private val style: ViewerStyle) : LinearL
             marginEnd = context.dpToPx(8f)
         })
 
-        date.textSize = 12f
+        date.textSize = style.pillTextSp
         date.setTextColor(style.pillTextDim)
         date.applyFont(style, false)
         date.setSingleLine(true)
@@ -169,7 +169,9 @@ class ViewerInfoPill(context: Context, private val style: ViewerStyle) : LinearL
         place.text = placeText
         date.visibility = if (dateText != null) View.VISIBLE else View.GONE
         date.text = dateText
-        separator.visibility = if (placeText != null && dateText != null) View.VISIBLE else View.GONE
+        separator.visibility = if (style.pillShowSeparator && placeText != null && dateText != null) View.VISIBLE else View.GONE
+        // without the dot, the date needs its own gap to the place
+        (date.layoutParams as? LayoutParams)?.marginStart = if (!style.pillShowSeparator && placeText != null) context.dpToPx(9f) else 0
         return item.isFavorite || placeText != null || dateText != null
     }
 }
@@ -340,7 +342,7 @@ class ViewerInfoPanel(context: Context, private val style: ViewerStyle) : Linear
         })
     }
 
-    private fun addBlock(icon: Int, title: String, lines: List<String>, titleSp: Float = if (style.cardBlocks) 14f else 13f, lineSp: Float = if (style.cardBlocks) 13f else 11f) {
+    private fun addBlock(icon: Int, title: String, lines: List<String>, titleSp: Float = if (style.cardBlocks) 13.5f else 13f, lineSp: Float = if (style.cardBlocks) 12f else 11f) {
         val ctx = context
         val row = LinearLayout(ctx)
         row.orientation = HORIZONTAL
@@ -447,5 +449,6 @@ internal class PanelButton(context: Context, private val style: ViewerStyle) : L
             addState(intArrayOf(), normal)
         }
         setPadding(context.dpToPx(11f) + ring, context.dpToPx(9f) + ring, context.dpToPx(11f) + ring, context.dpToPx(9f) + ring)
+        if (style.buttonHeightDp > 0) minimumHeight = context.dpToPx(style.buttonHeightDp.toFloat()) + 2 * ring
     }
 }
