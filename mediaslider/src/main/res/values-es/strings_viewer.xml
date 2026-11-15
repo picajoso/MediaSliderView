@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="viewer_favorite">Favorito</string>
+    <string name="viewer_in_favorites">En favoritos</string>
+    <string name="viewer_start_slideshow">Iniciar presentación</string>
+    <string name="viewer_details">Detalles</string>
+</resources>

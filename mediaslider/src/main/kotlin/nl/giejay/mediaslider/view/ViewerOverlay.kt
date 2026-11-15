@@ -206,7 +206,7 @@ class ViewerInfoPanel(context: Context, private val style: ViewerStyle) : Linear
 
         if (style.panelHeading) {
             val heading = TextView(context)
-            heading.text = "Details"
+            heading.text = context.getString(R.string.viewer_details)
             heading.textSize = 19f
             heading.setTextColor(style.text)
             heading.applyFont(style, true)
@@ -233,7 +233,7 @@ class ViewerInfoPanel(context: Context, private val style: ViewerStyle) : Linear
 
         favoriteButton.setOnClickListener { onFavoriteClick?.invoke() }
         slideshowButton.setOnClickListener { onSlideshowClick?.invoke() }
-        slideshowButton.set(R.drawable.ic_viewer_play, "Start slideshow", primary = false)
+        slideshowButton.set(R.drawable.ic_viewer_play, context.getString(R.string.viewer_start_slideshow), primary = false)
 
         // keep focus navigation inside the two buttons
         favoriteButton.id = View.generateViewId()
@@ -256,7 +256,7 @@ class ViewerInfoPanel(context: Context, private val style: ViewerStyle) : Linear
         val ctx = context
         favoriteButton.set(
             if (item.isFavorite) R.drawable.ic_favorite_white_filled_24dp else R.drawable.ic_viewer_heart,
-            if (item.isFavorite) "In favorites" else "Favorite",
+            context.getString(if (item.isFavorite) R.string.viewer_in_favorites else R.string.viewer_favorite),
             primary = item.isFavorite
         )
 
