@@ -314,6 +314,11 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
 
     fun loadMediaSliderView(config: MediaSliderConfiguration) {
         this.config = config
+        if (MediaSliderConfiguration.autoStartSlideshow) {
+            MediaSliderConfiguration.autoStartSlideshow = false
+            // after the pager has its adapter
+            postDelayed({ if (mPager.adapter != null && !slideShowPlaying) toggleSlideshow(true) }, 600)
+        }
 
         val listViewRight = findViewById<ListView>(R.id.metadata_view_right)
         metaDataRightAdapter = MetaDataAdapter(context,

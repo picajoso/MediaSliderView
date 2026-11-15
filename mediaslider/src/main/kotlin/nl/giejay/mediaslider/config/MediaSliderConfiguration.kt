@@ -118,6 +118,9 @@ class MediaSliderConfiguration : Parcelable {
         var loadPrevious: LoadMore? = null
         var onAssetSelected: (SliderItemViewHolder) -> Unit = { _ -> }
 
+        /** Set by the host right before opening the viewer: start the slideshow at once (one-shot). */
+        var autoStartSlideshow: Boolean = false
+
         @JvmField
         val CREATOR: Parcelable.Creator<MediaSliderConfiguration> =
             object : Parcelable.Creator<MediaSliderConfiguration> {
