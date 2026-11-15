@@ -23,6 +23,8 @@ data class ViewerStyle(
     val panelCornerDp: Float = 13f,
     val panelPaddingHDp: Int = 20,
     val panelPaddingVDp: Int = 22,
+    /** space around the photo while the panel is open (Apple: the photo floats with a margin) */
+    val photoInsetDp: Int = 17,
     /** "Details" heading above the blocks (Google TV) */
     val panelHeading: Boolean = false,
 
@@ -40,7 +42,8 @@ data class ViewerStyle(
     val primaryText: Int = 0xFF000000.toInt(),
     val secondaryBg: Int = 0x14FFFFFF,
     val secondaryText: Int = 0xFFF5F5F7.toInt(),
-    val focusRing: Int = 0xFFFFFFFF.toInt(),
+    /** ring drawn around the focused button, outside its fill (0 = none) */
+    val focusRing: Int = 0x40FFFFFF,
     val buttonCornerDp: Float = 8f,
 
     val titleTypeface: Typeface? = null,

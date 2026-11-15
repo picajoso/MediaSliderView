@@ -67,6 +67,7 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
     private var infoPanel: ViewerInfoPanel? = null
     private var infoPanelOpen = false
     private var infoPanelReservedPx = 0
+    private var photoInsetPx = 0
     private var swallowBackUp = false
     private val hideInfoPillRunnable = Runnable { hideInfoPillNow() }
 
@@ -405,6 +406,7 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
         infoPanel = panel
         // photo area keeps a small gap to the panel
         infoPanelReservedPx = ((style.panelWidthDp + style.panelMarginDp + 8) * density).toInt()
+        photoInsetPx = (style.photoInsetDp * density).toInt()
     }
 
     private fun showInfoPill() {
@@ -443,7 +445,7 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
         panel.translationX = infoPanelReservedPx.toFloat()
         panel.animate().translationX(0f).setDuration(180).start()
         // re-layout the photo to the left so the panel never covers it
-        setPagerEndMargin(infoPanelReservedPx)
+        setPagerMargins(photoInsetPx, infoPanelReservedPx + photoInsetPx)
         panel.focusFirstButton()
     }
 
@@ -457,14 +459,18 @@ class MediaSliderView(context: Context) : ConstraintLayout(context) {
         panel.animate().translationX(infoPanelReservedPx.toFloat()).setDuration(150).withEndAction {
             if (!infoPanelOpen) panel.visibility = GONE
         }.start()
-        setPagerEndMargin(0)
+        setPagerMargins(0, 0)
         showInfoPill()
     }
 
-    private fun setPagerEndMargin(px: Int) {
+    /** Re-lays the photo out: [inset] on the start/top/bottom, [end] on the panel side. */
+    private fun setPagerMargins(inset: Int, end: Int) {
         val lp = mPager.layoutParams as? LayoutParams ?: return
-        if (lp.marginEnd == px) return
-        lp.marginEnd = px
+        if (lp.marginEnd == end && lp.marginStart == inset && lp.topMargin == inset) return
+        lp.marginStart = inset
+        lp.topMargin = inset
+        lp.bottomMargin = inset
+        lp.marginEnd = end
         mPager.layoutParams = lp
     }
 

@@ -80,6 +80,19 @@ internal object ViewerFormat {
         return if (w != null && h != null && w > 0 && h > 0) "$w × $h" else null
     }
 
+    /** "50 MP · 4080 × 3072 · 6,2 MB" */
+    fun sizeLineWithDimensions(context: Context, d: SliderItemDetails): String? {
+        val w = d.width
+        val h = d.height
+        val known = w != null && h != null && w > 0 && h > 0
+        val parts = listOfNotNull(
+            if (known) "${maxOf(1L, Math.round(w!!.toLong() * h!! / 1_000_000.0))} MP" else null,
+            if (known) "$w × $h" else null,
+            d.fileSizeBytes?.takeIf { it > 0 }?.let { Formatter.formatShortFileSize(context, it) }
+        )
+        return if (parts.isEmpty()) null else parts.joinToString(" · ")
+    }
+
     /** "12 MP · 6.2 MB" */
     fun sizeLine(context: Context, d: SliderItemDetails): String? {
         val w = d.width
@@ -119,14 +132,14 @@ class ViewerInfoPill(context: Context, private val style: ViewerStyle) : LinearL
             marginEnd = context.dpToPx(8f)
         })
 
-        place.textSize = 13f
+        place.textSize = 12f
         place.setTextColor(style.pillText)
         place.applyFont(style, true)
         place.setSingleLine(true)
         addView(place, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
 
         separator.text = "·"
-        separator.textSize = 13f
+        separator.textSize = 12f
         separator.setTextColor(style.pillSeparator)
         separator.applyFont(style, false)
         addView(separator, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
@@ -134,7 +147,7 @@ class ViewerInfoPill(context: Context, private val style: ViewerStyle) : LinearL
             marginEnd = context.dpToPx(8f)
         })
 
-        date.textSize = 13f
+        date.textSize = 12f
         date.setTextColor(style.pillTextDim)
         date.applyFont(style, false)
         date.setSingleLine(true)
@@ -203,11 +216,18 @@ class ViewerInfoPanel(context: Context, private val style: ViewerStyle) : Linear
         blocks.orientation = VERTICAL
         addView(blocks, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
 
+        // buttons keep room for their focus ring outside the fill: pull them out by that much so
+        // the fills line up with the panel content (mockup: 12px between the two fills)
+        val ring = if (style.focusRing != 0) context.dpToPx(2f) else 0
         val gap = context.dpToPx(6f)
         addView(favoriteButton, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-            bottomMargin = gap
+            setMargins(-ring, 0, -ring, gap - 2 * ring)
         })
-        addView(slideshowButton, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        addView(slideshowButton, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+            setMargins(-ring, 0, -ring, -ring)
+        })
+        clipChildren = false
+        clipToPadding = false
 
         favoriteButton.setOnClickListener { onFavoriteClick?.invoke() }
         slideshowButton.setOnClickListener { onSlideshowClick?.invoke() }
@@ -269,23 +289,32 @@ class ViewerInfoPanel(context: Context, private val style: ViewerStyle) : Linear
             addBlock(R.drawable.ic_viewer_pin, country, emptyList())
         }
 
-        // camera + exposure
+        // camera + exposure (+ size in the Apple layout, which has no separate size block)
         if (d != null) {
             val camera = d.cameraName?.takeIf { it.isNotBlank() }
             val exposure = ViewerFormat.exposure(d)
-            if (camera != null) {
-                addBlock(R.drawable.ic_viewer_camera, camera, listOfNotNull(d.lensModel?.takeIf { it.isNotBlank() }, exposure))
-            } else if (exposure != null) {
-                addBlock(R.drawable.ic_viewer_camera, exposure, emptyList())
-            }
-
-            // size
             val dimensions = ViewerFormat.dimensions(d)
             val sizeLine = ViewerFormat.sizeLine(ctx, d)
-            if (dimensions != null) {
-                addBlock(R.drawable.ic_viewer_image, dimensions, listOfNotNull(sizeLine))
-            } else if (sizeLine != null) {
-                addBlock(R.drawable.ic_viewer_image, sizeLine, emptyList())
+            if (style.cardBlocks) {
+                if (camera != null) {
+                    addBlock(R.drawable.ic_viewer_camera, camera, listOfNotNull(exposure))
+                } else if (exposure != null) {
+                    addBlock(R.drawable.ic_viewer_camera, exposure, emptyList())
+                }
+                if (dimensions != null) {
+                    addBlock(R.drawable.ic_viewer_image, dimensions, listOfNotNull(sizeLine))
+                } else if (sizeLine != null) {
+                    addBlock(R.drawable.ic_viewer_image, sizeLine, emptyList())
+                }
+            } else {
+                // "50 MP · 4080 × 3072 · 6,2 MB"
+                val size = ViewerFormat.sizeLineWithDimensions(ctx, d)
+                if (camera != null) {
+                    addBlock(R.drawable.ic_viewer_camera, camera, listOfNotNull(exposure, size), titleSp = 12f, lineSp = 10.5f)
+                } else if (exposure != null || size != null) {
+                    val lines = listOfNotNull(exposure, size)
+                    addBlock(R.drawable.ic_viewer_camera, lines.first(), lines.drop(1), titleSp = 12f, lineSp = 10.5f)
+                }
             }
         }
     }
@@ -296,7 +325,7 @@ class ViewerInfoPanel(context: Context, private val style: ViewerStyle) : Linear
         column.orientation = VERTICAL
         val top = TextView(ctx)
         top.text = weekday
-        top.textSize = 13f
+        top.textSize = 10.5f
         top.setTextColor(style.dim)
         top.applyFont(style, false)
         column.addView(top)
@@ -311,7 +340,7 @@ class ViewerInfoPanel(context: Context, private val style: ViewerStyle) : Linear
         })
     }
 
-    private fun addBlock(icon: Int, title: String, lines: List<String>) {
+    private fun addBlock(icon: Int, title: String, lines: List<String>, titleSp: Float = if (style.cardBlocks) 14f else 13f, lineSp: Float = if (style.cardBlocks) 13f else 11f) {
         val ctx = context
         val row = LinearLayout(ctx)
         row.orientation = HORIZONTAL
@@ -328,23 +357,23 @@ class ViewerInfoPanel(context: Context, private val style: ViewerStyle) : Linear
         val iconView = ImageView(ctx)
         iconView.setImageResource(icon)
         iconView.setColorFilter(style.iconTint)
-        row.addView(iconView, LayoutParams(ctx.dpToPx(16f), ctx.dpToPx(16f)).apply {
-            topMargin = ctx.dpToPx(1f)
-            marginEnd = ctx.dpToPx(10f)
+        row.addView(iconView, LayoutParams(ctx.dpToPx(14f), ctx.dpToPx(14f)).apply {
+            topMargin = ctx.dpToPx(2f)
+            marginEnd = ctx.dpToPx(if (style.cardBlocks) 11f else 8f)
         })
 
         val column = LinearLayout(ctx)
         column.orientation = VERTICAL
         val titleView = TextView(ctx)
         titleView.text = title
-        titleView.textSize = 14f
+        titleView.textSize = titleSp
         titleView.setTextColor(style.text)
         titleView.applyFont(style, true)
         column.addView(titleView)
         lines.forEach { line ->
             val lineView = TextView(ctx)
             lineView.text = line
-            lineView.textSize = 13f
+            lineView.textSize = lineSp
             lineView.setTextColor(style.dim)
             lineView.applyFont(style, false)
             column.addView(lineView)
@@ -373,30 +402,50 @@ internal class PanelButton(context: Context, private val style: ViewerStyle) : L
         addView(icon, LayoutParams(context.dpToPx(14f), context.dpToPx(14f)).apply {
             marginEnd = context.dpToPx(8f)
         })
-        label.textSize = 13f
+        label.textSize = 11.5f
         label.setSingleLine(true)
+        // the button (this view) takes focus; icon and label follow its state for their colors
+        icon.isDuplicateParentStateEnabled = true
+        label.isDuplicateParentStateEnabled = true
         addView(label, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
     }
 
     fun set(iconRes: Int, text: String, primary: Boolean) {
-        val fg = if (primary) style.primaryText else style.secondaryText
-        val bg = if (primary) style.primaryBg else style.secondaryBg
+        // tvOS / Google TV convention: the FOCUSED button is the filled one; the favourite state
+        // is told by the label and the (filled) heart, see ViewerInfoPanel.bind
+        val colors = android.content.res.ColorStateList(
+            arrayOf(intArrayOf(android.R.attr.state_focused), intArrayOf()),
+            intArrayOf(style.primaryText, style.secondaryText)
+        )
         icon.setImageResource(iconRes)
-        icon.setColorFilter(fg)
+        icon.imageTintList = colors
         label.text = text
-        label.setTextColor(fg)
+        label.setTextColor(colors)
         label.applyFont(style, primary)
 
         val radius = context.dpToPx(style.buttonCornerDp).toFloat()
-        fun shape(stroke: Boolean) = GradientDrawable().apply {
+        val ring = if (style.focusRing != 0) context.dpToPx(2f) else 0
+        fun fill(color: Int) = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = radius
-            setColor(bg)
-            if (stroke) setStroke(context.dpToPx(2f), style.focusRing)
+            setColor(color)
         }
+        val focused = if (ring > 0) {
+            // ring outside the fill (CSS box-shadow 0 0 0 4px): the view keeps [ring] of room
+            val outer = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = radius + ring
+                setColor(style.focusRing)
+            }
+            android.graphics.drawable.LayerDrawable(arrayOf(outer, fill(style.primaryBg))).apply {
+                setLayerInset(1, ring, ring, ring, ring)
+            }
+        } else fill(style.primaryBg)
+        val normal = android.graphics.drawable.InsetDrawable(fill(style.secondaryBg), ring)
         background = StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_focused), shape(true))
-            addState(intArrayOf(), shape(false))
+            addState(intArrayOf(android.R.attr.state_focused), focused)
+            addState(intArrayOf(), normal)
         }
+        setPadding(context.dpToPx(11f) + ring, context.dpToPx(9f) + ring, context.dpToPx(11f) + ring, context.dpToPx(9f) + ring)
     }
 }
